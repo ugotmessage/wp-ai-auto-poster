@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # 一次性執行服務（執行完就關閉）
+  wp-article-generator:
+    build: .
+    container_name: wp-article-generator
+    env_file:
+      - .env
+    volumes:
+      # 掛載 used_refs.json 檔案以保持狀態
+      - ./used_refs.json:/app/used_refs.json
+      # 掛載日誌檔案到主機
+      - ./wp_article_generator.log:/app/wp_article_generator.log
+    # 不設定 restart，讓容器執行完就停止
+    command: python app.py
+    
+  # 定時執行服務（每天上午9點執行一次）
+  wp-article-scheduler:
+    build: .
+    container_name: wp-article-scheduler
+    env_file:
+      - .env
+    volumes:
+      - ./used_refs.json:/app/used_refs.json
+      # 掛載日誌檔案到主機
+      - ./wp_article_generator.log:/app/wp_article_generator.log
+    command: |
+      sh -c "
+        echo '0 9 * * * python /app/app.py' | crontab - &&
+        crond -f
+      "
+    restart: unless-stopped
