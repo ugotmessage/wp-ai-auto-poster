@@ -22,7 +22,7 @@
 
 1. **複製環境變數範本**
    ```bash
-   cp env.example .env
+   cp env.sample .env
    ```
 
 2. **編輯 `.env` 檔案**
@@ -61,7 +61,7 @@
 - `Dockerfile`: 定義 Python 應用程式的容器映像檔
 - `docker-compose.yml`: 定義服務和容器配置
 - `requirements.txt`: Python 依賴套件清單
-- `env.example`: 環境變數範本
+- `env.sample`: 環境變數範本
 - `used_refs.json`: 記錄已使用的參考連結（自動生成）
 
 ### 注意事項

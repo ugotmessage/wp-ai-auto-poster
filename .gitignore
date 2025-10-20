@@ -1,7 +1,7 @@
 # 環境變數檔案（包含敏感資訊）
 .env
 .env.*
-!.env.example
+!.env.sample
 
 # 日誌檔案
 *.log
