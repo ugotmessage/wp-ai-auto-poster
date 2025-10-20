@@ -340,7 +340,15 @@ def main():
             # 搜尋參考連結
             refs = get_reference_links(keyword, used_refs)
             if not refs:
-                logger.warning(f"沒找到新連結，改用空參考")
+                logger.warning(f"沒找到新連結，使用預設參考資料")
+                # 使用預設參考資料
+                default_refs = [
+                    "https://www.healthline.com",
+                    "https://pubmed.ncbi.nlm.nih.gov",
+                    "https://www.webmd.com"
+                ]
+                refs = default_refs[:2]  # 取前兩個
+                logger.info(f"使用預設參考連結: {refs}")
             else:
                 used_refs.extend(refs)
                 save_used_refs(used_refs)
