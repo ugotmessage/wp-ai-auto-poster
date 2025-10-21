@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.sample
+!env.sample
 
 # 日誌檔案
 *.log
@@ -10,6 +11,7 @@ log/
 
 # 動態資料檔案
 used_refs.json
+!used_refs.json.template
 
 # Python 相關
 __pycache__/

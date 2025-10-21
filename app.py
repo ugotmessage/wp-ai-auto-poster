@@ -20,6 +20,10 @@ KEYWORDS  = [k.strip() for k in os.getenv("KEYWORDS", "").split(",") if k.strip(
 TAGS_BASE = [t.strip() for t in os.getenv("TAGS", "").split(",") if t.strip()]
 POSTS_PER_DAY = int(os.getenv("POSTS_PER_DAY", "1"))
 
+# === SEO 設定 ===
+SEO_BRAND_SUFFIX = os.getenv("SEO_BRAND_SUFFIX", "｜健康誌")
+DEFAULT_SEO_KEYWORDS = [k.strip() for k in os.getenv("DEFAULT_SEO_KEYWORDS", "").split(",") if k.strip()]
+
 USED_FILE = "used_refs.json"
 LOG_FILE = "wp_article_generator.log"
 
@@ -41,6 +45,70 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 logger = setup_logging()
+
+# ---------------------------------------------------------------
+# SEO 解析工具
+# ---------------------------------------------------------------
+def parse_gemini_output(text):
+    """解析 Gemini 輸出，提取 SEO metadata 和文章內容"""
+    try:
+        # 提取 SEO 標題
+        seo_title = extract_between(text, "SEO_TITLE:", "SEO_DESC:")
+        if not seo_title:
+            seo_title = extract_after(text, "SEO_TITLE:")
+        
+        # 提取 SEO 描述
+        seo_desc = extract_between(text, "SEO_DESC:", "SEO_KEYWORD:")
+        if not seo_desc:
+            seo_desc = extract_after(text, "SEO_DESC:")
+        
+        # 提取 SEO 關鍵字
+        seo_keyword = extract_between(text, "SEO_KEYWORD:", "ARTICLE:")
+        if not seo_keyword:
+            seo_keyword = extract_after(text, "SEO_KEYWORD:")
+        
+        # 提取文章內容
+        article = extract_after(text, "ARTICLE:")
+        
+        # 清理文字
+        seo_title = seo_title.strip() if seo_title else ""
+        seo_desc = seo_desc.strip() if seo_desc else ""
+        seo_keyword = seo_keyword.strip() if seo_keyword else ""
+        article = article.strip() if article else ""
+        
+        logger.info(f"解析 SEO 資料 - 標題: {seo_title[:50]}..., 描述: {seo_desc[:50]}..., 關鍵字: {seo_keyword}")
+        
+        return seo_title, seo_desc, seo_keyword, article
+        
+    except Exception as e:
+        logger.error(f"解析 Gemini 輸出失敗: {e}")
+        return "", "", "", ""
+
+def extract_between(text, start_marker, end_marker):
+    """提取兩個標記之間的文字"""
+    try:
+        start_idx = text.find(start_marker)
+        if start_idx == -1:
+            return ""
+        start_idx += len(start_marker)
+        
+        end_idx = text.find(end_marker, start_idx)
+        if end_idx == -1:
+            return text[start_idx:].strip()
+        
+        return text[start_idx:end_idx].strip()
+    except:
+        return ""
+
+def extract_after(text, marker):
+    """提取標記之後的文字"""
+    try:
+        idx = text.find(marker)
+        if idx == -1:
+            return ""
+        return text[idx + len(marker):].strip()
+    except:
+        return ""
 
 # ---------------------------------------------------------------
 # 工具
@@ -120,22 +188,28 @@ def gemini_generate_article(keyword, brand, site_name, refs):
     
     refs_text = "\n".join(f"- {r}" for r in refs) if refs else "（無特定參考連結）"
     prompt = f"""
-請以生活化保健專欄風格撰寫一篇約800～1200字的文章。
-主題：「{keyword}」
+主題：{keyword}
+
+請生成以下四個部分（繁體中文）：
+1. SEO 標題（70 字內）
+2. SEO 描述（150 字內）
+3. 焦點關鍵字（1~3 個）
+4. 文章內容（HTML 格式）
+
 條件：
 - 文章開頭或結尾自然出現一次品牌「{brand}」與站名「{site_name}」
-- HTML格式，含<h2>/<h3>/<p>段落。
+- HTML格式，含<h2>/<h3>/<p>段落
 - 在文末附上參考資料清單：
 {refs_text}
 
-輸出格式（純JSON）：
-{{
-  "seo_title": "...",
-  "meta_desc": "...",
-  "content": "...",      # HTML
-  "tags": ["...", "..."],
-  "references": [{refs_text}]
-}}
+輸出格式如下：
+---
+SEO_TITLE: [SEO 標題，70字內，包含品牌後綴「{SEO_BRAND_SUFFIX}」]
+SEO_DESC: [SEO 描述，150字內，吸引點擊]
+SEO_KEYWORD: [焦點關鍵字，1-3個，用逗號分隔]
+---
+ARTICLE:
+[文章內容，HTML格式，800-1200字]
 """
     
     headers = {
@@ -187,7 +261,7 @@ def gemini_generate_article(keyword, brand, site_name, refs):
         logger.error(f"Gemini API 請求發生未知錯誤: {e}")
         return None
 
-    # 嘗試剖析 JSON
+    # 使用新的解析器處理 Gemini 回應
     try:
         # 清理 markdown 程式碼區塊標記
         cleaned_text = text.strip()
@@ -199,36 +273,51 @@ def gemini_generate_article(keyword, brand, site_name, refs):
             cleaned_text = cleaned_text[:-3]  # 移除結尾的 ```
         
         cleaned_text = cleaned_text.strip()
-        logger.info(f"清理後的 JSON 長度: {len(cleaned_text)} 字元")
+        logger.info(f"清理後的文字長度: {len(cleaned_text)} 字元")
         
-        obj = json.loads(cleaned_text)
-        logger.info("成功解析 Gemini 回應 JSON")
+        # 使用新的解析器
+        seo_title, seo_desc, seo_keyword, article = parse_gemini_output(cleaned_text)
         
         # 驗證必要欄位
-        required_fields = ["seo_title", "meta_desc", "content"]
-        missing_fields = [field for field in required_fields if not obj.get(field)]
-        
-        if missing_fields:
-            logger.error(f"Gemini 回應缺少必要欄位: {missing_fields}")
-            logger.error(f"完整回應: {obj}")
+        if not seo_title or not article:
+            logger.error(f"Gemini 回應缺少必要欄位 - 標題: {bool(seo_title)}, 內容: {bool(article)}")
+            logger.error(f"原始回應: {cleaned_text[:500]}...")
             return None
             
         # 檢查內容品質
-        if len(obj.get("content", "")) < 100:
-            logger.warning(f"生成內容過短: {len(obj.get('content', ''))} 字元")
-            
-        logger.info(f"文章生成成功 - 標題: {obj.get('seo_title', 'N/A')}")
+        if len(article) < 100:
+            logger.warning(f"生成內容過短: {len(article)} 字元")
         
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON 解析失敗: {e}")
-        logger.error(f"原始回應: {text[:500]}...")
-        return None
+        # 如果 SEO 描述為空，使用預設
+        if not seo_desc:
+            seo_desc = f"{keyword} 健康懶人包 - {SEO_BRAND_SUFFIX}"
+            logger.warning("使用預設 SEO 描述")
+        
+        # 如果 SEO 關鍵字為空，使用預設
+        if not seo_keyword:
+            seo_keyword = ",".join(DEFAULT_SEO_KEYWORDS[:3])
+            logger.warning("使用預設 SEO 關鍵字")
+        
+        # 組合文章內容（包含參考資料）
+        content_html = assemble_html(article, refs, brand, site_name, TAGS_BASE)
+        
+        # 建立回傳物件
+        obj = {
+            "seo_title": seo_title,
+            "meta_desc": seo_desc,
+            "content": content_html,
+            "tags": DEFAULT_SEO_KEYWORDS,
+            "references": refs,
+            "focus_keyword": seo_keyword
+        }
+            
+        logger.info(f"文章生成成功 - 標題: {seo_title[:50]}...")
+        
     except Exception as e:
         logger.error(f"處理 Gemini 回應時發生錯誤: {e}")
+        logger.error(f"原始回應: {text[:500]}...")
         return None
 
-    # 過濾重複連結
-    obj["references"] = [r for r in obj.get("references", []) if r.startswith("http")]
     return obj
 
 # ---------------------------------------------------------------
@@ -244,41 +333,79 @@ def wp_post_exists_by_slug(slug):
             return True
     return False
 
-def wp_publish(title, content_html, meta_desc, slug):
-    """發佈文章到 WordPress"""
+def safe_publish_to_wp(title, content_html, meta_desc, slug, focus_keyword=""):
+    """安全發送文章至 WordPress，偵測 Yoast 欄位封鎖後自動重試"""
     logger.info(f"準備發佈文章到 WordPress: {title}")
     
+    # 建立基本 payload
     payload = {
         "title": title,
         "content": content_html,
         "status": "publish",
         "slug": slug,
-        "excerpt": meta_desc[:150],
-        "meta": {
-            "_yoast_wpseo_title": title,
-            "_yoast_wpseo_metadesc": meta_desc
-        }
+        "excerpt": meta_desc[:150]
     }
+    
+    # 加入分類
     if CATEGORY_ID > 0:
         payload["categories"] = [CATEGORY_ID]
         logger.info(f"指定分類 ID: {CATEGORY_ID}")
-
+    
+    # 加入 Yoast SEO meta 欄位
+    meta_fields = {
+        "_yoast_wpseo_title": title,
+        "_yoast_wpseo_metadesc": meta_desc
+    }
+    
+    if focus_keyword:
+        meta_fields["_yoast_wpseo_focuskw"] = focus_keyword
+    
+    payload["meta"] = meta_fields
+    
     try:
+        logger.info("嘗試發送包含 Yoast SEO meta 欄位的文章...")
         r = requests.post(WP_URL, auth=(WP_USER, WP_PASS), json=payload, timeout=60)
         
-        if r.status_code == 201:
-            logger.info(f"✅ WordPress 發佈成功: {title}")
+        # 檢查是否為 403 錯誤且與 meta 欄位相關
+        if r.status_code == 403 and ("meta" in r.text.lower() or "forbidden" in r.text.lower()):
+            logger.warning("⚠️ Yoast SEO 欄位未開啟，跳過 meta 欄位重新發送...")
+            
+            # 移除 meta 欄位重新發送
+            payload.pop("meta", None)
+            r = requests.post(WP_URL, auth=(WP_USER, WP_PASS), json=payload, timeout=60)
+            
+            if r.status_code == 201:
+                logger.info(f"✅ WordPress 發佈成功（無 meta 欄位）: {title}")
+                logger.info(f"文章 URL: {r.json().get('link', 'N/A')}")
+                return r.json()
+            else:
+                logger.error(f"❌ WordPress 發佈失敗（無 meta 欄位），狀態碼: {r.status_code}")
+                logger.error(f"錯誤回應: {r.text}")
+                return None
+        
+        elif r.status_code == 201:
+            logger.info(f"✅ WordPress 發佈成功（含 meta 欄位）: {title}")
             logger.info(f"文章 URL: {r.json().get('link', 'N/A')}")
+            return r.json()
+        
         else:
             logger.error(f"❌ WordPress 發佈失敗，狀態碼: {r.status_code}")
             logger.error(f"錯誤回應: {r.text}")
+            return None
             
     except requests.exceptions.Timeout:
         logger.error("WordPress API 請求超時")
+        return None
     except requests.exceptions.RequestException as e:
         logger.error(f"WordPress API 請求失敗: {e}")
+        return None
     except Exception as e:
         logger.error(f"發佈到 WordPress 時發生未知錯誤: {e}")
+        return None
+
+def wp_publish(title, content_html, meta_desc, slug):
+    """向後相容的發佈函數"""
+    return safe_publish_to_wp(title, content_html, meta_desc, slug)
 
 # ---------------------------------------------------------------
 # HTML 組合
@@ -373,7 +500,8 @@ def main():
             # 準備發佈內容
             seo_title = obj["seo_title"].strip()
             meta_desc = obj["meta_desc"].strip()
-            content_html = assemble_html(obj["content"], obj["references"], BRAND, SITE_NAME, TAGS_BASE + obj["tags"])
+            content_html = obj["content"]  # 已經包含參考資料
+            focus_keyword = obj.get("focus_keyword", "")
 
             # 檢查標題是否過短
             if len(seo_title) < 10:
@@ -386,12 +514,23 @@ def main():
                 tries += 1
                 slug = f"{slug}-{tries}"
 
-            # 發佈到 WordPress
+            # 發佈到 WordPress（使用新的安全發佈函數）
             logger.info(f"準備發佈文章: {seo_title}")
-            wp_publish(seo_title, content_html, meta_desc, slug)
-            success_count += 1
+            result = safe_publish_to_wp(
+                seo_title, 
+                content_html, 
+                meta_desc, 
+                slug, 
+                focus_keyword
+            )
             
-            logger.info(f"✅ 成功處理關鍵字: {keyword}")
+            if result:
+                success_count += 1
+                logger.info(f"✅ 成功處理關鍵字: {keyword}")
+            else:
+                failure_count += 1
+                logger.error(f"❌ 發佈失敗，跳過關鍵字: {keyword}")
+                continue
             
         except Exception as e:
             logger.error(f"處理關鍵字 {keyword} 時發生錯誤: {e}")
