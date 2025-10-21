@@ -199,17 +199,17 @@ def gemini_generate_article(keyword, brand, site_name, refs):
 條件：
 - 文章開頭或結尾自然出現一次品牌「{brand}」與站名「{site_name}」
 - HTML格式，含<h2>/<h3>/<p>段落
-- 在文末附上參考資料清單：
-{refs_text}
+- 文章內容中不要包含參考資料清單（會由系統自動加入）
+- 參考資料來源：{refs_text}
 
 輸出格式如下：
 ---
-SEO_TITLE: [SEO 標題，70字內，包含品牌後綴「{SEO_BRAND_SUFFIX}」]
+SEO_TITLE: [SEO 標題，70字內，必須以「{SEO_BRAND_SUFFIX}」結尾]
 SEO_DESC: [SEO 描述，150字內，吸引點擊]
 SEO_KEYWORD: [焦點關鍵字，1-3個，用逗號分隔]
 ---
 ARTICLE:
-[文章內容，HTML格式，800-1200字]
+[文章內容，HTML格式，800-1200字，不包含參考資料區塊]
 """
     
     headers = {
@@ -297,6 +297,11 @@ ARTICLE:
         if not seo_keyword:
             seo_keyword = ",".join(DEFAULT_SEO_KEYWORDS[:3])
             logger.warning("使用預設 SEO 關鍵字")
+        
+        # 驗證和修正 SEO 標題
+        if not seo_title.endswith(SEO_BRAND_SUFFIX):
+            seo_title = f"{seo_title}{SEO_BRAND_SUFFIX}"
+            logger.info(f"已為標題加入品牌後綴: {seo_title}")
         
         # 組合文章內容（包含參考資料）
         content_html = assemble_html(article, refs, brand, site_name, TAGS_BASE)
