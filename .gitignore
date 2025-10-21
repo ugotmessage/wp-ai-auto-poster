@@ -99,3 +99,7 @@ $RECYCLE.BIN/
 # 臨時檔案
 *.tmp
 *.temp
+
+# 診斷和修復腳本（本地使用，不上傳）
+diagnose.sh
+fix.sh

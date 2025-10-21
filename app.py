@@ -199,7 +199,7 @@ def gemini_generate_article(keyword, brand, site_name, refs):
 條件：
 - 文章開頭或結尾自然出現一次品牌「{brand}」與站名「{site_name}」
 - HTML格式，含<h2>/<h3>/<p>段落
-- 文章內容中不要包含參考資料清單（會由系統自動加入）
+- 可選擇性地在文章末尾加入參考資料區塊（格式：<h3>參考資料</h3><ul><li><a href="連結">標題</a></li></ul>）
 - 參考資料來源：{refs_text}
 
 輸出格式如下：
@@ -416,17 +416,16 @@ def wp_publish(title, content_html, meta_desc, slug):
 # HTML 組合
 # ---------------------------------------------------------------
 def assemble_html(content_html, refs, brand, site_name, tags):
-    ref_block = ""
-    if refs:
-        lis = "".join(f'<li><a href="{r}" target="_blank" rel="nofollow noopener">{r}</a></li>' for r in refs)
-        ref_block = f"<hr><h3>參考資料</h3><ul>{lis}</ul>"
-
+    """組合文章 HTML，只加入標籤和品牌簽名，不強制加入參考資料"""
+    
     tag_block = ""
     if tags:
         tag_block = "<p><em>標籤：</em>" + "、".join(tags) + "</p>"
 
     sig = f"<p style='color:#666;'>本文由 <strong>{brand}</strong> 提供，更多健康補充知識請見：<strong>{site_name}</strong></p>"
-    return content_html + ref_block + tag_block + sig
+    
+    # 只加入標籤和品牌簽名，讓 AI 自己決定是否包含參考資料
+    return content_html + tag_block + sig
 
 # ---------------------------------------------------------------
 # 環境變數檢查
