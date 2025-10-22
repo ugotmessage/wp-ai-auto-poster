@@ -328,6 +328,33 @@ ARTICLE:
 # ---------------------------------------------------------------
 # WordPress 工具
 # ---------------------------------------------------------------
+def get_wp_tags():
+    """從 WordPress 獲取現有標籤列表"""
+    try:
+        tags_url = WP_URL.replace('/posts', '/tags')
+        logger.info(f"獲取 WordPress 標籤列表: {tags_url}")
+        
+        r = requests.get(tags_url, auth=(WP_USER, WP_PASS), timeout=15)
+        
+        if r.status_code == 200:
+            tags_data = r.json()
+            tags = [tag['name'] for tag in tags_data if tag.get('name')]
+            logger.info(f"成功獲取 {len(tags)} 個 WordPress 標籤: {tags[:5]}...")
+            return tags
+        else:
+            logger.warning(f"獲取 WordPress 標籤失敗，狀態碼: {r.status_code}")
+            return []
+            
+    except requests.exceptions.Timeout:
+        logger.error("獲取 WordPress 標籤超時")
+        return []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"獲取 WordPress 標籤失敗: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"獲取 WordPress 標籤時發生未知錯誤: {e}")
+        return []
+
 def wp_post_exists_by_slug(slug):
     search_url = WP_URL + f"?search={quote(slug)}&per_page=3"
     r = requests.get(search_url, auth=(WP_USER, WP_PASS), timeout=15)
@@ -458,13 +485,30 @@ def main():
     # 檢查環境變數
     check_env_vars()
     
+    # 智能選擇關鍵字來源
+    logger.info("🔍 檢查關鍵字來源...")
+    wp_tags = get_wp_tags()
+    
+    if wp_tags:
+        # 使用 WordPress 標籤作為關鍵字
+        keywords_to_use = wp_tags
+        logger.info(f"✅ 使用 WordPress 標籤作為關鍵字 ({len(keywords_to_use)} 個)")
+    else:
+        # 使用環境變數中的關鍵字
+        keywords_to_use = KEYWORDS
+        logger.info(f"✅ 使用環境變數關鍵字 ({len(keywords_to_use)} 個)")
+    
+    if not keywords_to_use:
+        logger.error("❌ 沒有可用的關鍵字，程式結束")
+        return
+    
     used_refs = load_used_refs()
-    random.shuffle(KEYWORDS)
+    random.shuffle(keywords_to_use)
     
     success_count = 0
     failure_count = 0
     
-    for keyword in KEYWORDS[:POSTS_PER_DAY]:
+    for keyword in keywords_to_use[:POSTS_PER_DAY]:
         logger.info(f"開始處理主題: {keyword}")
         
         try:
