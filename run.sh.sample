@@ -1,6 +1,4 @@
 #!/bin/bash
-cd /srv/docker/wp-ai-auto-poster
-export $(grep -v '^#' /srv/docker/wp-ai-auto-poster/.env | xargs)
 
 # WordPress 文章自動生成器 - 執行腳本
 # 作者: AI Assistant

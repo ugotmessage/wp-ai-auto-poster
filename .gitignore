@@ -3,6 +3,7 @@
 .env.*
 !.env.sample
 !env.sample
+run.sh
 
 # 日誌檔案
 *.log
