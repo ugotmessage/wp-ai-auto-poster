@@ -14,6 +14,9 @@ log/
 used_refs.json
 !used_refs.json.template
 
+# 測試輸出
+test_output/
+
 # Python 相關
 __pycache__/
 *.py[cod]

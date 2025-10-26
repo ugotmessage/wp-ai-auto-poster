@@ -24,8 +24,12 @@ POSTS_PER_DAY = int(os.getenv("POSTS_PER_DAY", "1"))
 SEO_BRAND_SUFFIX = os.getenv("SEO_BRAND_SUFFIX", "｜健康誌")
 DEFAULT_SEO_KEYWORDS = [k.strip() for k in os.getenv("DEFAULT_SEO_KEYWORDS", "").split(",") if k.strip()]
 
+# === 測試模式 ===
+TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
+
 USED_FILE = "used_refs.json"
 LOG_FILE = "wp_article_generator.log"
+TEST_OUTPUT_DIR = "test_output"
 
 # === Google API URLs ===
 GENAI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GENAI_MODEL}:generateContent"
@@ -475,6 +479,70 @@ def assemble_html(content_html, brand, site_name, tags):
     return content_html + tag_block + sig
 
 # ---------------------------------------------------------------
+# 測試模式工具
+# ---------------------------------------------------------------
+def check_for_links(html_content):
+    """檢查 HTML 內容是否包含連結"""
+    link_patterns = [
+        (r'<a\s+[^>]*>.*?</a>', 'a 標籤'),
+        (r'https?://[^\s<>"{}|\\^`\[\]]+', 'URL 連結'),
+        (r'<h[23]>\s*參考資料</h[23]>', '參考資料標題'),
+        (r'<h[23]>\s*資料來源</h[23]>', '資料來源標題'),
+        (r'<h[23]>\s*參考連結</h[23]>', '參考連結標題'),
+    ]
+    
+    found = []
+    for pattern, description in link_patterns:
+        matches = re.findall(pattern, html_content, re.IGNORECASE)
+        if matches:
+            found.append((description, matches))
+    
+    return found
+
+def save_test_output(keyword, obj):
+    """保存測試輸出到本地文件"""
+    if not os.path.exists(TEST_OUTPUT_DIR):
+        os.makedirs(TEST_OUTPUT_DIR)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{TEST_OUTPUT_DIR}/test_{timestamp}_{keyword}.txt"
+    
+    # 檢查是否有連結
+    links_found = check_for_links(obj["content"])
+    
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(f"測試時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"關鍵字: {keyword}\n")
+        f.write(f"=" * 80 + "\n\n")
+        
+        f.write(f"SEO 標題: {obj['seo_title']}\n")
+        f.write(f"SEO 描述: {obj['meta_desc']}\n")
+        f.write(f"焦點關鍵字: {obj.get('focus_keyword', '')}\n")
+        f.write(f"=" * 80 + "\n\n")
+        
+        if links_found:
+            f.write("⚠️ 發現連結！\n")
+            for desc, matches in links_found:
+                f.write(f"  - {desc}: {len(matches)} 個\n")
+                for match in matches[:3]:  # 只顯示前3個
+                    f.write(f"    {match}\n")
+            f.write(f"=" * 80 + "\n\n")
+        else:
+            f.write("✅ 沒有發現任何連結\n")
+            f.write(f"=" * 80 + "\n\n")
+        
+        f.write("文章內容:\n")
+        f.write(obj["content"])
+    
+    logger.info(f"測試輸出已保存到: {filename}")
+    if links_found:
+        logger.warning(f"⚠️ 發現連結: {links_found}")
+    else:
+        logger.info("✅ 文章內容乾淨，沒有任何連結")
+    
+    return filename
+
+# ---------------------------------------------------------------
 # 環境變數檢查
 # ---------------------------------------------------------------
 def check_env_vars():
@@ -502,12 +570,19 @@ def main():
     """主程式流程，包含完整的錯誤處理和日誌記錄"""
     logger.info("=== WordPress 文章自動生成器開始執行 ===")
     
+    if TEST_MODE:
+        logger.info("🧪 測試模式已啟用 - 文章將保存到本地文件，不會推送到 WordPress")
+    
     # 檢查環境變數
     check_env_vars()
     
     # 智能選擇關鍵字來源
     logger.info("🔍 檢查關鍵字來源...")
-    wp_tags = get_wp_tags()
+    
+    wp_tags = []
+    if not TEST_MODE:
+        # 只在非測試模式下嘗試連接 WordPress
+        wp_tags = get_wp_tags()
     
     if wp_tags:
         # 使用 WordPress 標籤作為關鍵字
@@ -557,6 +632,14 @@ def main():
             if len(seo_title) < 10:
                 logger.warning(f"標題過短: {seo_title}")
 
+            # 測試模式：保存到本地文件
+            if TEST_MODE:
+                logger.info("🧪 測試模式：保存到本地文件")
+                save_test_output(keyword, obj)
+                success_count += 1
+                logger.info(f"✅ 測試完成: {keyword}")
+                continue
+            
             # 生成唯一 slug
             slug = slugify(seo_title)
             tries = 0

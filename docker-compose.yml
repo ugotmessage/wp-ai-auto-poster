@@ -12,7 +12,25 @@ services:
       - ./used_refs.json:/app/used_refs.json
       # 掛載日誌檔案到主機
       - ./wp_article_generator.log:/app/wp_article_generator.log
+      # 掛載測試輸出目錄
+      - ./test_output:/app/test_output
     # 不設定 restart，讓容器執行完就停止
+    command: python app.py
+    
+  # 測試模式服務（用於本地測試，不會推送到 WordPress）
+  wp-article-test:
+    build: .
+    container_name: wp-article-test
+    env_file:
+      - .env
+    environment:
+      - TEST_MODE=true
+    volumes:
+      # 掛載測試輸出目錄
+      - ./test_output:/app/test_output
+      # 掛載日誌檔案到主機
+      - ./wp_article_generator.log:/app/wp_article_generator.log
+    # 執行完就停止
     command: python app.py
     
   # 定時執行服務（每天上午9點執行一次）
@@ -25,6 +43,8 @@ services:
       - ./used_refs.json:/app/used_refs.json
       # 掛載日誌檔案到主機
       - ./wp_article_generator.log:/app/wp_article_generator.log
+      # 掛載測試輸出目錄
+      - ./test_output:/app/test_output
     command: |
       sh -c "
         echo '0 9 * * * python /app/app.py' | crontab - &&
