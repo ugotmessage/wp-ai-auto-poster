@@ -76,6 +76,9 @@ def parse_gemini_output(text):
         seo_keyword = seo_keyword.strip() if seo_keyword else ""
         article = article.strip() if article else ""
         
+        # 強制移除所有連結
+        article = remove_all_links(article)
+        
         logger.info(f"解析 SEO 資料 - 標題: {seo_title[:50]}..., 描述: {seo_desc[:50]}..., 關鍵字: {seo_keyword}")
         
         return seo_title, seo_desc, seo_keyword, article
@@ -109,6 +112,21 @@ def extract_after(text, marker):
         return text[idx + len(marker):].strip()
     except:
         return ""
+
+def remove_all_links(text):
+    """移除所有 HTML 連結標籤和參考資料區塊"""
+    # 移除所有 <a> 標籤及其內容
+    text = re.sub(r'<a\s+[^>]*>.*?</a>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # 移除參考資料區塊
+    text = re.sub(r'<h[23]>\s*參考資料</h[23]>.*?</ul>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<h[23]>\s*資料來源</h[23]>.*?</ul>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<h[23]>\s*參考連結</h[23]>.*?</ul>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # 移除殘留的 URL
+    text = re.sub(r'https?://[^\s<>"{}|\\^`\[\]]+', '', text)
+    
+    return text
 
 # ---------------------------------------------------------------
 # 工具
@@ -182,11 +200,10 @@ def get_reference_links(keyword, used_list, num_results=5):
 # ---------------------------------------------------------------
 # Gemini 產文
 # ---------------------------------------------------------------
-def gemini_generate_article(keyword, brand, site_name, refs):
+def gemini_generate_article(keyword, brand, site_name):
     """使用 Gemini AI 生成文章，包含詳細的錯誤處理和日誌記錄"""
     logger.info(f"開始生成文章，關鍵字: {keyword}")
     
-    refs_text = "\n".join(f"- {r}" for r in refs) if refs else "（無特定參考連結）"
     prompt = f"""
 主題：{keyword}
 
@@ -199,8 +216,12 @@ def gemini_generate_article(keyword, brand, site_name, refs):
 條件：
 - 文章開頭或結尾自然出現一次品牌「{brand}」與站名「{site_name}」
 - HTML格式，含<h2>/<h3>/<p>段落
-- 可選擇性地在文章末尾加入參考資料區塊（格式：<h3>參考資料</h3><ul><li><a href="連結">標題</a></li></ul>）
-- 參考資料來源：{refs_text}
+- **嚴格禁止**：不使用任何 <a href> 連結標籤
+- **嚴格禁止**：不使用任何 <h3>參考資料</h3> 或 <h2>參考資料</h2> 區塊
+- **嚴格禁止**：不使用任何 <ul><li> 連結列表
+- **嚴格禁止**：不使用任何外部 URL 連結
+- **嚴格禁止**：不使用任何來源註釋或參考註解
+- 文章內容應為純粹的獨立的知識分享，僅使用 <p>, <h2>, <h3>, <strong>, <em> 等基本標籤
 
 輸出格式如下：
 ---
@@ -209,7 +230,7 @@ SEO_DESC: [SEO 描述，150字內，吸引點擊]
 SEO_KEYWORD: [焦點關鍵字，1-3個，用逗號分隔]
 ---
 ARTICLE:
-[文章內容，HTML格式，800-1200字，不包含參考資料區塊]
+[文章內容，HTML格式，800-1200字，純粹的知識分享內容，嚴格禁止任何連結或參考資料]
 """
     
     headers = {
@@ -303,8 +324,8 @@ ARTICLE:
             seo_title = f"{seo_title}{SEO_BRAND_SUFFIX}"
             logger.info(f"已為標題加入品牌後綴: {seo_title}")
         
-        # 組合文章內容（包含參考資料）
-        content_html = assemble_html(article, refs, brand, site_name, TAGS_BASE)
+        # 組合文章內容
+        content_html = assemble_html(article, brand, site_name, TAGS_BASE)
         
         # 建立回傳物件
         obj = {
@@ -312,7 +333,6 @@ ARTICLE:
             "meta_desc": seo_desc,
             "content": content_html,
             "tags": DEFAULT_SEO_KEYWORDS,
-            "references": refs,
             "focus_keyword": seo_keyword
         }
             
@@ -442,8 +462,8 @@ def wp_publish(title, content_html, meta_desc, slug):
 # ---------------------------------------------------------------
 # HTML 組合
 # ---------------------------------------------------------------
-def assemble_html(content_html, refs, brand, site_name, tags):
-    """組合文章 HTML，只加入標籤和品牌簽名，不強制加入參考資料"""
+def assemble_html(content_html, brand, site_name, tags):
+    """組合文章 HTML，只加入標籤和品牌簽名"""
     
     tag_block = ""
     if tags:
@@ -451,7 +471,7 @@ def assemble_html(content_html, refs, brand, site_name, tags):
 
     sig = f"<p style='color:#666;'>本文由 <strong>{brand}</strong> 提供，更多健康補充知識請見：<strong>{site_name}</strong></p>"
     
-    # 只加入標籤和品牌簽名，讓 AI 自己決定是否包含參考資料
+    # 只加入標籤和品牌簽名
     return content_html + tag_block + sig
 
 # ---------------------------------------------------------------
@@ -502,7 +522,6 @@ def main():
         logger.error("❌ 沒有可用的關鍵字，程式結束")
         return
     
-    used_refs = load_used_refs()
     random.shuffle(keywords_to_use)
     
     success_count = 0
@@ -512,25 +531,8 @@ def main():
         logger.info(f"開始處理主題: {keyword}")
         
         try:
-            # 搜尋參考連結
-            refs = get_reference_links(keyword, used_refs)
-            if not refs:
-                logger.warning(f"沒找到新連結，使用預設參考資料")
-                # 使用預設參考資料
-                default_refs = [
-                    "https://www.healthline.com",
-                    "https://pubmed.ncbi.nlm.nih.gov",
-                    "https://www.webmd.com"
-                ]
-                refs = default_refs[:2]  # 取前兩個
-                logger.info(f"使用預設參考連結: {refs}")
-            else:
-                used_refs.extend(refs)
-                save_used_refs(used_refs)
-                logger.info(f"找到 {len(refs)} 個新參考連結")
-
             # 生成文章
-            obj = gemini_generate_article(keyword, BRAND, SITE_NAME, refs)
+            obj = gemini_generate_article(keyword, BRAND, SITE_NAME)
             
             # 檢查生成是否成功
             if obj is None:
@@ -548,7 +550,7 @@ def main():
             # 準備發佈內容
             seo_title = obj["seo_title"].strip()
             meta_desc = obj["meta_desc"].strip()
-            content_html = obj["content"]  # 已經包含參考資料
+            content_html = obj["content"]  # 已經包含完整的文章內容
             focus_keyword = obj.get("focus_keyword", "")
 
             # 檢查標題是否過短
