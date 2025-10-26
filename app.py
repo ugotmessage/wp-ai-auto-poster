@@ -118,7 +118,7 @@ def extract_after(text, marker):
         return ""
 
 def remove_all_links(text):
-    """移除所有 HTML 連結標籤和參考資料區塊"""
+    """移除所有 HTML 連結標籤、參考資料區塊和 URL"""
     # 移除所有 <a> 標籤及其內容
     text = re.sub(r'<a\s+[^>]*>.*?</a>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
@@ -127,8 +127,12 @@ def remove_all_links(text):
     text = re.sub(r'<h[23]>\s*資料來源</h[23]>.*?</ul>', '', text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<h[23]>\s*參考連結</h[23]>.*?</ul>', '', text, flags=re.DOTALL | re.IGNORECASE)
     
-    # 移除殘留的 URL
+    # 移除帶協議的 URL（http:// 或 https://）
     text = re.sub(r'https?://[^\s<>"{}|\\^`\[\]]+', '', text)
+    
+    # 移除純文字網址（xxx.com、xxx.org、xxx.info、xxx.net 等）
+    # 只匹配常見的頂級域名，避免誤刪
+    text = re.sub(r'\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(?:com|org|net|info|edu|gov|io|co|tech|app|site|online|store|shop|htapp)\b', '', text, flags=re.IGNORECASE)
     
     return text
 
@@ -475,8 +479,13 @@ def assemble_html(content_html, brand, site_name, tags):
 
     sig = f"<p style='color:#666;'>本文由 <strong>{brand}</strong> 提供，更多健康補充知識請見：<strong>{site_name}</strong></p>"
     
-    # 只加入標籤和品牌簽名
-    return content_html + tag_block + sig
+    # 組合完整的 HTML
+    full_html = content_html + tag_block + sig
+    
+    # 最後一次移除所有可能的網址（包括簽名中的）
+    full_html = remove_all_links(full_html)
+    
+    return full_html
 
 # ---------------------------------------------------------------
 # 測試模式工具
@@ -486,6 +495,7 @@ def check_for_links(html_content):
     link_patterns = [
         (r'<a\s+[^>]*>.*?</a>', 'a 標籤'),
         (r'https?://[^\s<>"{}|\\^`\[\]]+', 'URL 連結'),
+        (r'\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(?:com|org|net|info|edu|gov|io|co|tech|app|site|online|store|shop|htapp)\b', '純文字網址'),
         (r'<h[23]>\s*參考資料</h[23]>', '參考資料標題'),
         (r'<h[23]>\s*資料來源</h[23]>', '資料來源標題'),
         (r'<h[23]>\s*參考連結</h[23]>', '參考連結標題'),
